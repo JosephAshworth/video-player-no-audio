@@ -14,6 +14,9 @@
     .dropzone { border: 2px dashed currentColor; border-radius: 8px; padding: 16px; text-align: center; opacity: .8; }
     .dropzone.dragover { opacity: 1; border-style: solid; }
     button { padding: 8px 12px; border-radius: 6px; border: 1px solid currentColor; background: transparent; cursor: pointer; }
+    .player-controls { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+    .time { font-variant-numeric: tabular-nums; font-size: 12px; opacity: .8; }
+    input[type="range"] { width: min(600px, 60vw); }
   </style>
 </head>
 <body>
@@ -30,7 +33,14 @@
   </div>
 
   <div style="margin-top:16px;">
-    <video id="player" controls playsinline muted preload="metadata"></video>
+    <video id="player" playsinline muted preload="metadata"></video>
+
+    <div class="player-controls" aria-label="Playback controls (volume is permanently disabled)">
+      <button id="playPause" type="button">Play</button>
+      <button id="restart" type="button" title="Restart">↺</button>
+      <input id="seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Seek timeline">
+      <span class="time" id="timeLabel">00:00 / 00:00</span>
+    </div>
   </div>
 
   <script>
@@ -39,14 +49,27 @@
       const player = document.getElementById('player');
       const dropzone = document.getElementById('dropzone');
       const clearBtn = document.getElementById('clearBtn');
+      const playPause = document.getElementById('playPause');
+      const restart = document.getElementById('restart');
+      const seek = document.getElementById('seek');
+      const timeLabel = document.getElementById('timeLabel');
 
       let currentObjectUrl = null;
 
-      function ensureMuted(videoEl) {
+      function formatTime(seconds) {
+        if (!isFinite(seconds)) return '00:00';
+        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+        const m = Math.floor((seconds / 60) % 60).toString().padStart(2, '0');
+        const h = Math.floor(seconds / 3600);
+        return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+      }
+
+      function lockVolume(videoEl) {
         videoEl.muted = true;
         videoEl.defaultMuted = true;
         try { videoEl.volume = 0; } catch (_) {}
-        const tryDisableTracks = () => {
+        // Try to disable audio tracks where supported
+        const disableTracks = () => {
           try {
             if (videoEl.audioTracks && videoEl.audioTracks.length) {
               for (let i = 0; i < videoEl.audioTracks.length; i++) {
@@ -55,8 +78,31 @@
             }
           } catch (_) {}
         };
-        tryDisableTracks();
-        videoEl.addEventListener('loadedmetadata', tryDisableTracks, { once: true });
+        disableTracks();
+        videoEl.addEventListener('loadedmetadata', disableTracks, { once: true });
+
+        // If anything attempts to change volume or unmute, force back to 0/muted
+        const enforce = () => {
+          if (!videoEl.muted || videoEl.volume !== 0) {
+            try { videoEl.volume = 0; } catch (_) {}
+            videoEl.muted = true;
+            videoEl.defaultMuted = true;
+          }
+        };
+        videoEl.addEventListener('volumechange', enforce);
+        videoEl.addEventListener('play', enforce);
+        videoEl.addEventListener('loadeddata', enforce);
+        enforce();
+
+        // Best-effort hardening: lock the volume property for this element
+        try {
+          Object.defineProperty(videoEl, 'volume', {
+            configurable: false,
+            enumerable: true,
+            get: () => 0,
+            set: () => {},
+          });
+        } catch (_) {}
       }
 
       function loadFile(file) {
@@ -71,7 +117,7 @@
         }
         currentObjectUrl = URL.createObjectURL(file);
         player.src = currentObjectUrl;
-        ensureMuted(player);
+        lockVolume(player);
         player.play().catch(() => {});
       }
 
@@ -105,11 +151,50 @@
         player.pause();
         player.removeAttribute('src');
         player.load();
-        ensureMuted(player);
+        lockVolume(player);
         fileInput.value = '';
+        timeLabel.textContent = '00:00 / 00:00';
+        seek.value = '0';
+        playPause.textContent = 'Play';
       });
 
-      ensureMuted(player);
+      // Custom controls
+      playPause.addEventListener('click', () => {
+        if (!player.src) return;
+        if (player.paused) {
+          lockVolume(player);
+          player.play().catch(() => {});
+        } else {
+          player.pause();
+        }
+      });
+      restart.addEventListener('click', () => {
+        if (!player.src) return;
+        player.currentTime = 0;
+        lockVolume(player);
+        player.play().catch(() => {});
+      });
+      seek.addEventListener('input', () => {
+        if (!player.duration || !isFinite(player.duration)) return;
+        const pct = Number(seek.value) / 100;
+        player.currentTime = pct * player.duration;
+      });
+
+      player.addEventListener('play', () => { playPause.textContent = 'Pause'; });
+      player.addEventListener('pause', () => { playPause.textContent = 'Play'; });
+
+      const updateUi = () => {
+        const cur = player.currentTime || 0;
+        const dur = player.duration || 0;
+        const pct = dur ? (cur / dur) * 100 : 0;
+        seek.value = String(pct);
+        timeLabel.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+      };
+      player.addEventListener('timeupdate', updateUi);
+      player.addEventListener('loadedmetadata', updateUi);
+
+      // Initial lock
+      lockVolume(player);
     })();
   </script>
 </body>
