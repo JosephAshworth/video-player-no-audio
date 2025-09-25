@@ -28,6 +28,11 @@
     <span class="hint">Pick a video file. It will play with no audio.</span>
   </div>
 
+  <div id="recentFiles" style="margin-bottom: 16px; display: none;">
+    <h3 style="font-size: 14px; margin: 0 0 8px; opacity: .8;">Recent Files</h3>
+    <div id="recentList" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+  </div>
+
   <div id="dropzone" class="dropzone" aria-label="Drop video file here">
     Drag & drop a video file here
   </div>
@@ -53,8 +58,11 @@
       const restart = document.getElementById('restart');
       const seek = document.getElementById('seek');
       const timeLabel = document.getElementById('timeLabel');
+      const recentFiles = document.getElementById('recentFiles');
+      const recentList = document.getElementById('recentList');
 
       let currentObjectUrl = null;
+      let recentFilesList = JSON.parse(localStorage.getItem('recentVideoFiles') || '[]');
 
       function formatTime(seconds) {
         if (!isFinite(seconds)) return '00:00';
@@ -105,6 +113,80 @@
         } catch (_) {}
       }
 
+      function addToRecent(file) {
+        // Read file as ArrayBuffer to store the actual data
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const fileInfo = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            lastModified: file.lastModified,
+            data: Array.from(new Uint8Array(e.target.result)) // Convert to regular array for JSON storage
+          };
+          
+          // Remove if already exists
+          recentFilesList = recentFilesList.filter(f => f.name !== fileInfo.name);
+          
+          // Add to beginning
+          recentFilesList.unshift(fileInfo);
+          
+          // Keep only last 5 files (to avoid localStorage size limits)
+          recentFilesList = recentFilesList.slice(0, 5);
+          
+          // Save to localStorage
+          try {
+            localStorage.setItem('recentVideoFiles', JSON.stringify(recentFilesList));
+          } catch (e) {
+            // If storage is full, remove oldest files
+            recentFilesList = recentFilesList.slice(0, 3);
+            localStorage.setItem('recentVideoFiles', JSON.stringify(recentFilesList));
+          }
+          
+          updateRecentUI();
+        };
+        reader.readAsArrayBuffer(file);
+      }
+
+      function updateRecentUI() {
+        if (recentFilesList.length === 0) {
+          recentFiles.style.display = 'none';
+          return;
+        }
+        
+        recentFiles.style.display = 'block';
+        recentList.innerHTML = '';
+        
+        recentFilesList.forEach((fileInfo, index) => {
+          const btn = document.createElement('button');
+          btn.textContent = fileInfo.name;
+          btn.title = `Size: ${Math.round(fileInfo.size / 1024 / 1024 * 100) / 100} MB`;
+          btn.style.fontSize = '12px';
+          btn.style.padding = '4px 8px';
+          btn.style.maxWidth = '200px';
+          btn.style.overflow = 'hidden';
+          btn.style.textOverflow = 'ellipsis';
+          btn.style.whiteSpace = 'nowrap';
+          
+          btn.addEventListener('click', () => {
+            if (fileInfo.data && fileInfo.data.length > 0) {
+              // Recreate file from stored data
+              const uint8Array = new Uint8Array(fileInfo.data);
+              const file = new File([uint8Array], fileInfo.name, {
+                type: fileInfo.type,
+                lastModified: fileInfo.lastModified
+              });
+              loadFile(file);
+            } else {
+              // File data not available, prompt to reselect
+              alert('File data not available. Please reselect the file.');
+            }
+          });
+          
+          recentList.appendChild(btn);
+        });
+      }
+
       function loadFile(file) {
         if (!file) return;
         if (!file.type.startsWith('video/')) {
@@ -119,6 +201,9 @@
         player.src = currentObjectUrl;
         lockVolume(player);
         player.play().catch(() => {});
+        
+        // Add to recent files
+        addToRecent(file);
       }
 
       function handleFiles(files) {
@@ -195,6 +280,9 @@
 
       // Initial lock
       lockVolume(player);
+      
+      // Load recent files on startup
+      updateRecentUI();
     })();
   </script>
 </body>
