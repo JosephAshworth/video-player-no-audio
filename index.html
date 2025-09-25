@@ -154,7 +154,7 @@
         const fileInfo = { key, name: file.name, size: file.size, type: file.type, lastModified: file.lastModified, hasData: false };
         recentFilesList = recentFilesList.filter(f => f.key !== key);
         recentFilesList.unshift(fileInfo);
-        recentFilesList = recentFilesList.slice(0, 5);
+        recentFilesList = recentFilesList.slice(0, 20);
         persistRecent();
         updateRecentUI();
       }
@@ -316,7 +316,7 @@
               return { key, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, hasData: !!f.data };
             });
             // Drop very large lists
-            recentFilesList = recentFilesList.slice(0, 5);
+            recentFilesList = recentFilesList.slice(0, 20);
             persistRecent();
           }
         } catch (_) { recentFilesList = []; }
